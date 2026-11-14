@@ -41,6 +41,15 @@ export default function GroupDetailsPage() {
   const [expandedPhoto, setExpandedPhoto] = useState<string | null>(null);
   const [uploadStatus, setUploadStatus] = useState("");
   const photoInputRef = useRef<HTMLInputElement>(null);
+
+const photoUrlCacheRef = useRef<
+  Map<string, { url: string; expiresAt: number }>
+>(new Map());
+
+const voiceUrlCacheRef = useRef<
+  Map<string, { url: string; expiresAt: number }>
+>(new Map());
+
   const [voiceByMessage, setVoiceByMessage] = useState<Record<string, VoiceDisplay>>({});
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -63,36 +72,106 @@ export default function GroupDetailsPage() {
   const isMember = members.some((m) => m.user_id === userId);
   const isAdmin = members.some((m) => m.user_id === userId && m.role === "admin");
 
-  const loadPhotos = useCallback(async () => {
-    const supabase = createClient();
-    const { data, error: photoError } = await supabase.from("chat_group_attachments")
-      .select("id, message_id, storage_path");
-    if (photoError) { console.error("Group photo metadata:", photoError.message); return; }
-    const next: Record<string, PhotoDisplay[]> = {};
-    await Promise.all(((data ?? []) as GroupPhoto[]).map(async (photo) => {
-      const { data: signed, error: signError } = await supabase.storage
-        .from("group-chat-photos").createSignedUrl(photo.storage_path, 3600);
-      if (signError || !signed?.signedUrl) return;
-      (next[photo.message_id] ??= []).push({ id: photo.id, url: signed.signedUrl });
-    }));
-    setPhotosByMessage(next);
-  }, []);
+  
+const loadPhotos = useCallback(async () => {
+  const supabase = createClient();
 
-  const loadVoices = useCallback(async () => {
-    const supabase = createClient();
-    const { data, error: readError } = await supabase.from("chat_group_voice_messages")
-      .select("message_id, storage_path, duration_seconds");
-    if (readError) { console.error("Group voice metadata:", readError.message); return; }
-    const result: Record<string, VoiceDisplay> = {};
-    await Promise.all(((data ?? []) as VoiceMetadata[]).map(async (item) => {
-      const { data: signed, error: signError } = await supabase.storage.from("group-chat-voice")
-        .createSignedUrl(item.storage_path, 3600);
-      if (!signError && signed?.signedUrl) result[item.message_id] = {
-        url: signed.signedUrl, duration: item.duration_seconds,
+  const { data, error: photoError } = await supabase
+    .from("chat_group_attachments")
+    .select("id, message_id, storage_path");
+
+  if (photoError) {
+    console.error("Group photo metadata:", photoError.message);
+    return;
+  }
+
+  const next: Record<string, PhotoDisplay[]> = {};
+
+  await Promise.all(
+    ((data ?? []) as GroupPhoto[]).map(async (photo) => {
+      const cacheKey = photo.storage_path;
+      const cached = photoUrlCacheRef.current.get(cacheKey);
+
+      let url: string;
+
+      if (cached && cached.expiresAt > Date.now()) {
+        url = cached.url;
+      } else {
+        const { data: signed, error: signError } =
+          await supabase.storage
+            .from("group-chat-photos")
+            .createSignedUrl(photo.storage_path, 3600);
+
+        if (signError || !signed?.signedUrl) return;
+
+        url = signed.signedUrl;
+
+        photoUrlCacheRef.current.set(cacheKey, {
+          url,
+          expiresAt: Date.now() + 55 * 60 * 1000,
+        });
+      }
+
+      (next[photo.message_id] ??= []).push({
+        id: photo.id,
+        url,
+      });
+    })
+  );
+
+  setPhotosByMessage(next);
+}, []);
+
+
+  
+const loadVoices = useCallback(async () => {
+  const supabase = createClient();
+
+  const { data, error: readError } = await supabase
+    .from("chat_group_voice_messages")
+    .select("message_id, storage_path, duration_seconds");
+
+  if (readError) {
+    console.error("Group voice metadata:", readError.message);
+    return;
+  }
+
+  const result: Record<string, VoiceDisplay> = {};
+
+  await Promise.all(
+    ((data ?? []) as VoiceMetadata[]).map(async (item) => {
+      const cacheKey = item.storage_path;
+      const cached = voiceUrlCacheRef.current.get(cacheKey);
+
+      let url: string;
+
+      if (cached && cached.expiresAt > Date.now()) {
+        url = cached.url;
+      } else {
+        const { data: signed, error: signError } =
+          await supabase.storage
+            .from("group-chat-voice")
+            .createSignedUrl(item.storage_path, 3600);
+
+        if (signError || !signed?.signedUrl) return;
+
+        url = signed.signedUrl;
+
+        voiceUrlCacheRef.current.set(cacheKey, {
+          url,
+          expiresAt: Date.now() + 55 * 60 * 1000,
+        });
+      }
+
+      result[item.message_id] = {
+        url,
+        duration: item.duration_seconds,
       };
-    }));
-    setVoiceByMessage(result);
-  }, []);
+    })
+  );
+
+  setVoiceByMessage(result);
+}, []);
 
   useEffect(() => {
     if (!recordedVoice) { setVoicePreviewUrl(null); return; }
@@ -291,7 +370,13 @@ export default function GroupDetailsPage() {
         if (status === "CHANNEL_ERROR") console.error("Group chat realtime subscription failed");
       });
     // Fallback for projects where this table is not yet in the realtime publication.
-    const poll = window.setInterval(() => { void loadMessages(); }, 5000);
+    
+const poll = window.setInterval(() => {
+  if (document.visibilityState === "visible") {
+    void loadMessages();
+  }
+}, 30000);
+
     return () => { window.clearInterval(poll); void supabase.removeChannel(channel); };
   }, [groupId, isMember, loadMessages]);
 
