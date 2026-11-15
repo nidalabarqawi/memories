@@ -17,7 +17,8 @@ type:
   | "group_ownership_received"
   | "group_ownership_transferred"
   | "group_join_approved"
-  | "group_join_declined";
+  | "group_join_declined"
+  | "group_invitation";
 
   connection_id: string | null;
   group_id: string | null;
@@ -78,23 +79,23 @@ const [groupNames, setGroupNames] = useState<Record<string, string>>({});
     setProfileAccess(Object.fromEntries(results.map((item) => [item.actorId, item.available])));
 
     // Load group names for ownership notifications.
-      const groupIds = Array.from(
-        new Set(
-          rows
-            .filter((item) =>
-
-
-  item.type === "group_ownership_received" ||
-  item.type === "group_ownership_transferred" ||
-  item.type === "group_join_approved" ||
-  item.type === "group_join_declined"
-
-
-          )
-          .map((item) => item.group_id)
-          .filter((value): value is string => Boolean(value))
+      
+const groupIds = Array.from(
+  new Set(
+    rows
+      .filter(
+        (item) =>
+          item.type === "group_ownership_received" ||
+          item.type === "group_ownership_transferred" ||
+          item.type === "group_join_approved" ||
+          item.type === "group_join_declined" ||
+          item.type === "group_invitation"
       )
-    );
+      .map((item) => item.group_id)
+      .filter((value): value is string => Boolean(value))
+  )
+);
+
 
     if (groupIds.length > 0) {
       const { data: groups, error: groupsError } = await supabase
@@ -317,6 +318,9 @@ const joinApproved =
 const joinDeclined =
   item.type === "group_join_declined";
 
+const groupInvitation =
+  item.type === "group_invitation";
+
 
 
 const isOwnershipNotification =
@@ -345,8 +349,19 @@ const groupName = item.group_id
 
 
 
+
 <strong style={{ color: "#873b50" }}>
-  {joinDeclined
+  {groupInvitation
+    ? t(
+        actorName
+          ? `${actorName} invited you to join ${groupName || "a classmate group"}`
+          : `You have been invited to join ${groupName || "a classmate group"}`,
+        actorName
+          ? `دعاك ${actorName} للانضمام إلى ${groupName || "مجموعة زملاء الدراسة"}`
+          : `تمت دعوتك للانضمام إلى ${groupName || "مجموعة زملاء الدراسة"}`
+      )
+    : joinDeclined
+
     ? t(
         "Group join request declined",
         "تم رفض طلب الانضمام إلى المجموعة"
@@ -427,8 +442,13 @@ const groupName = item.group_id
 
 <p style={{ color: "#6e6268", lineHeight: 1.7, margin: "10px 0" }}>
 
-{joinDeclined
+{groupInvitation
   ? t(
+      `You have been invited to join ${groupName || "a classmate group"}.`,
+      `تمت دعوتك للانضمام إلى ${groupName || "مجموعة زملاء الدراسة"}.`
+    )
+  : joinDeclined
+    ? t(
       `Your request to join ${groupName || "the group"} was declined.`,
       `تم رفض طلب انضمامك إلى مجموعة ${groupName || "المجموعة"}.`
     )
@@ -468,7 +488,9 @@ const groupName = item.group_id
 
 <Link
   href={
-    joinDeclined
+  groupInvitation
+    ? "/dashboard/groups"
+    : joinDeclined
       ? "/dashboard/groups/discover"
       : isOwnershipNotification || joinApproved
         ? item.group_id
@@ -477,22 +499,24 @@ const groupName = item.group_id
         : request
           ? "/dashboard/connection-requests"
           : "/dashboard/connections"
-  }
+}
   style={{ color: "#873b50", fontWeight: 700 }}
 >
 
 
 
 
-{joinDeclined
-  ? t("Discover groups", "استكشاف المجموعات")
-  : isOwnershipNotification || joinApproved
-    ? item.group_id
-      ? t("View group", "عرض المجموعة")
-      : t("View my groups", "عرض مجموعاتي")
-    : request
-      ? t("Review requests", "مراجعة الطلبات")
-      : t("View connections", "عرض زملائي المتصلين")}
+{groupInvitation
+  ? t("View invitation", "عرض الدعوة")
+  : joinDeclined
+    ? t("Discover groups", "استكشاف المجموعات")
+    : isOwnershipNotification || joinApproved
+      ? item.group_id
+        ? t("View group", "عرض المجموعة")
+        : t("View my groups", "عرض مجموعاتي")
+      : request
+        ? t("Review requests", "مراجعة الطلبات")
+        : t("View connections", "عرض زملائي المتصلين")}
 
 </Link>
 
