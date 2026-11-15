@@ -241,12 +241,35 @@ async function logout() {
 
     const { error } = await supabase.auth.signOut();
 
+   
+
     if (error) {
       throw error;
     }
 
+    // Clear cached private-photo URLs after successful logout.
+    try {
+      const keysToRemove: string[] = [];
+
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const key = sessionStorage.key(i);
+
+        if (key?.startsWith("memories-photo-url:")) {
+          keysToRemove.push(key);
+        }
+      }
+
+      keysToRemove.forEach((key) => {
+        sessionStorage.removeItem(key);
+      });
+    } catch (cacheError) {
+      console.warn("Could not clear photo URL cache:", cacheError);
+    }
+
     router.replace("/login");
     router.refresh();
+
+
   } catch (err) {
     console.error("Logout failed:", err);
 

@@ -7,6 +7,58 @@ import { createClient } from "@/lib/supabase/client";
 
 const supabase = createClient();
 
+
+const PHOTO_CACHE_PREFIX = "memories-photo-url:";
+
+function photoCacheKey(userId: string, storagePath: string) {
+  return `${userId}:${storagePath}`;
+}
+
+
+type CachedPhotoUrl = {
+  url: string;
+  expiresAt: number;
+};
+
+function getCachedPhotoUrl(storagePath: string): string | null {
+  try {
+    const raw = sessionStorage.getItem(
+      PHOTO_CACHE_PREFIX + storagePath
+    );
+
+    if (!raw) return null;
+
+    const cached = JSON.parse(raw) as CachedPhotoUrl;
+
+    if (
+      typeof cached.url === "string" &&
+      cached.expiresAt > Date.now()
+    ) {
+      return cached.url;
+    }
+
+    sessionStorage.removeItem(PHOTO_CACHE_PREFIX + storagePath);
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function setCachedPhotoUrl(storagePath: string, url: string) {
+  try {
+    sessionStorage.setItem(
+      PHOTO_CACHE_PREFIX + storagePath,
+      JSON.stringify({
+        url,
+        expiresAt: Date.now() + 55 * 60 * 1000,
+      })
+    );
+  } catch {
+    // Continue normally if session storage is unavailable.
+  }
+}
+
 type Props = {
   memoryId: string;
   lang: "en" | "ar";
@@ -111,21 +163,35 @@ const prefix = `${memoryOwner.author_id}/${memoryId}/`;
 
         const results = await Promise.all(
           validMedia.map(async (item) => {
-            const { data, error: urlError } =
-              await supabase.storage
-                .from("memory-photos")
-                .createSignedUrl(item.storage_path, 3600);
+            
+const cacheKey = photoCacheKey(
+  authData.user.id,
+  item.storage_path
+);
 
-            if (urlError || !data?.signedUrl) {
-              throw new Error(
-                urlError?.message ?? "Could not load photo."
-              );
-            }
+let url = getCachedPhotoUrl(cacheKey);
 
-            return {
-              id: item.id,
-              url: data.signedUrl,
-            };
+if (!url) {
+  const { data, error: urlError } =
+    await supabase.storage
+      .from("memory-photos")
+      .createSignedUrl(item.storage_path, 3600);
+
+  if (urlError || !data?.signedUrl) {
+    throw new Error(
+      urlError?.message ?? "Could not load photo."
+    );
+  }
+
+  url = data.signedUrl;
+  setCachedPhotoUrl(cacheKey, url);
+}
+
+return {
+  id: item.id,
+  url,
+};
+
           })
         );
 
